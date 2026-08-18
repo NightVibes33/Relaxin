@@ -10,42 +10,71 @@ jobs:
     runs-on: macos-15
     permissions:
       contents: read
-      actions: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Select installed Xcode
+        shell: bash
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.4.app
-          xcodebuild -version
-          xcode-select -p
-
-      - name: Install build dependencies
-        run: |
-          brew install ldid zstd gnu-tar ripgrep
-
-      - name: Build unsigned IPA (iOS 16 device target)
-        run: |
-          chmod +x DevKit/Helpers/*.sh DevKit/Packaging/RelaxinLite/*.sh || true
-          IPHONEOS_DEPLOYMENT_TARGET=16.0 make ipa
-
-      - name: Verify IPA
-        run: |
-          IPA=$(find build/Artifacts -maxdepth 1 -type f -name '*.ipa' -print -quit)
-          test -n "$IPA"
-          echo "IPA=$IPA"
-          unzip -l "$IPA" | sed -n '1,80p'
-          unzip -p "$IPA" Payload/Relaxin.app/Info.plist > /tmp/Info.plist 2>/dev/null || true
-          if [ -s /tmp/Info.plist ]; then
-            plutil -p /tmp/Info.plist | sed -n '1,120p'
+          set -euo pipefail
+          if [[ -d /Applications/Xcode_16.4.app/Contents/Developer ]]; then
+            export DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer
+          elif [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+            export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+          else
+            DEVELOPER_DIR="$(find /Applications -maxdepth 2 -type d -path '*/Xcode*.app/Contents/Developer' | sort | tail -n 1)"
+            test -n "$DEVELOPER_DIR"
+            export DEVELOPER_DIR
           fi
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          xcode-select -p
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install required host tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v rg >/dev/null 2>&1 || brew install ripgrep
+          command -v rg
+
+      - name: Build unsigned iOS 16 device IPA
+        shell: bash
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+          CODE_SIGNING_ALLOWED: 'NO'
+          CODE_SIGNING_REQUIRED: 'NO'
+          CODE_SIGN_IDENTITY: ''
+        run: |
+          set -euo pipefail
+          chmod +x DevKit/Helpers/*.sh DevKit/Packaging/RelaxinLite/*.sh || true
+          make clean
+          make ipa
+
+      - name: Verify unsigned device IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA="$(find build/Artifacts -maxdepth 1 -type f -name '*.ipa' -print -quit)"
+          test -n "$IPA"
+          unzip -tq "$IPA"
+          unzip -p "$IPA" Payload/Relaxin.app/Info.plist > /tmp/Relaxin-Info.plist
+          plutil -p /tmp/Relaxin-Info.plist
+          TARGET="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' /tmp/Relaxin-Info.plist 2>/dev/null || true)"
+          echo "MinimumOSVersion=$TARGET"
+          test "$TARGET" = "16.0"
+          if unzip -Z1 "$IPA" | grep -Eq '(^|/)(_CodeSignature/|embedded\.mobileprovision$)'; then
+            echo 'error: unsigned IPA contains signing material' >&2
+            exit 1
+          fi
+          echo "Verified device IPA: $IPA"
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Relaxin-unsigned-IPA
+          name: Relaxin-unsigned-IPA-iOS16
           path: build/Artifacts/*.ipa
           if-no-files-found: error
           retention-days: 14
