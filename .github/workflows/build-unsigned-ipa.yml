@@ -81,12 +81,15 @@ jobs:
           plutil -p /tmp/Relaxin-Info.plist
           TARGET="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' /tmp/Relaxin-Info.plist 2>/dev/null || true)"
           echo "MinimumOSVersion=$TARGET"
-          test "$TARGET" = "16.0"
+          case "$TARGET" in
+            16|16.*) ;;
+            *) echo "error: IPA minimum OS is not iOS 16.x: $TARGET" >&2; exit 1 ;;
+          esac
           if unzip -Z1 "$IPA" | grep -Eq '(^|/)(_CodeSignature/|embedded\\.mobileprovision$)'; then
             echo 'error: unsigned IPA contains signing material' >&2
             exit 1
           fi
-          echo "Verified device IPA: $IPA"
+          echo "Verified unsigned iOS 16 device IPA: $IPA"
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
