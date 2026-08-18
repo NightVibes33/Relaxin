@@ -37,8 +37,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          brew install dpkg ldid
           command -v rg >/dev/null 2>&1 || brew install ripgrep
+
+          mkdir -p "$HOME/.local/bin"
+          curl -fL --retry 3 \
+            "https://github.com/CRKatri/trustcache/releases/download/v2.0/trustcache_macos_arm64" \
+            -o "$HOME/.local/bin/trustcache"
+          chmod +x "$HOME/.local/bin/trustcache"
+          xattr -rc "$HOME/.local/bin/trustcache" || true
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
           command -v rg
+          command -v dpkg-deb
+          command -v ldid
+          command -v trustcache
+          trustcache --help >/dev/null 2>&1 || trustcache -h >/dev/null 2>&1 || true
 
       - name: Build unsigned iOS 16 device IPA
         shell: bash
@@ -65,7 +79,7 @@ jobs:
           TARGET="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' /tmp/Relaxin-Info.plist 2>/dev/null || true)"
           echo "MinimumOSVersion=$TARGET"
           test "$TARGET" = "16.0"
-          if unzip -Z1 "$IPA" | grep -Eq '(^|/)(_CodeSignature/|embedded\.mobileprovision$)'; then
+          if unzip -Z1 "$IPA" | grep -Eq '(^|/)(_CodeSignature/|embedded\\.mobileprovision$)'; then
             echo 'error: unsigned IPA contains signing material' >&2
             exit 1
           fi
