@@ -1,0 +1,51 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Install build dependencies
+        run: |
+          brew install ldid zstd gnu-tar ripgrep
+
+      - name: Build unsigned IPA
+        run: |
+          chmod +x DevKit/Helpers/*.sh DevKit/Packaging/RelaxinLite/*.sh || true
+          make ipa
+
+      - name: Verify IPA
+        run: |
+          IPA=$(find build/Artifacts -maxdepth 1 -type f -name '*.ipa' -print -quit)
+          test -n "$IPA"
+          echo "IPA=$IPA"
+          unzip -l "$IPA" | sed -n '1,80p'
+          unzip -p "$IPA" Payload/Relaxin.app/Info.plist > /tmp/Info.plist 2>/dev/null || true
+          if [ -s /tmp/Info.plist ]; then
+            plutil -p /tmp/Info.plist | sed -n '1,120p'
+          fi
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Relaxin-unsigned-IPA
+          path: build/Artifacts/*.ipa
+          if-no-files-found: error
+          retention-days: 14
