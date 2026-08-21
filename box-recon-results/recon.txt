@@ -1,0 +1,581 @@
+=== context ===
+Fri Aug 21 21:14:33 UTC 2026
+Linux runnervm76f27 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+=== docs/openapi ===
+openapi_bytes=140787
+11:security:
+17:      operationId: deliverBoxLifecycleEvent
+19:      security: []
+54:    description: Unified Box account, setup, lifecycle, prompting, event history, desktop access, and SSH operations.
+59:      scheme: bearer
+60:      bearerFormat: box_api_key
+61:      description: Box bearer token in the form `box_...`. Service API keys authenticate Box operations.
+95:      name: snapshotId
+99:      description: Snapshot id returned by the snapshot list/latest calls.
+111:      description: Must exactly equal the target `boxId` or `snapshotId`. A missing or mismatched value returns `409` without accepting deletion.
+160:      required: [id, name, state, desktopAvailable, snapshotAvailable]
+205:        desktopAvailable:
+207:        desktopUrl:
+210:          description: Secret-bearing desktop stream URL when available. Redact from logs.
+211:        snapshotAvailable:
+213:        snapshotCompletedAt:
+216:          description: Timestamp of the most recent successfully completed snapshot, or null.
+223:          description: Timestamp of the most recent snapshot attempt of any status (queued, in_progress, completed, failed, cancelled), or null. Use with snapshotCompletedAt to detect snapshots that keep failing.
+227:          description: Status of the most recent snapshot attempt, or null if none. A value other than completed while snapshotCompletedAt stays stale indicates failing snapshots.
+243:            none (a `noEnv` box, or one whose environment was deleted). A box freezes onto
+548:            life: stopping, resuming and forking all preserve it, and forks inherit the source
+568:            inherit the source box's env unless the fork request supplies its own `env`.
+577:            to the box, exactly like `noEnv`.
+579:        noEnv:
+584:            variables, secret files, or credentials), confined to itself so it cannot act on your
+585:            account or other boxes. For boxes you give to your own users. SSH, SCP, desktop,
+586:            snapshots, and public URLs still work; pass `env` to give the box a secret of its own.
+587:            A fork of a no-env box is always no-env. Equivalent to attaching an environment marked
+604:            Create the box from a named snapshot (saved with `POST /named-snapshots`, or
+605:            `box snapshot <id> <name>` in the CLI). The box starts from that exact frozen
+606:            state. Omitting `type` inherits the type the snapshot was saved from; env and
+607:            no-env inherit from the snapshot's source box unless the request passes its own,
+608:            with the same rules as forking.
+619:          noEnv: true
+628:            Stop the box even if its disk cannot be snapshotted. Everything written
+629:            since the last successful snapshot is permanently LOST. Without this, a box
+630:            whose snapshot pipeline is failing is left running rather than discarding
+659:        noEnv:
+663:            secrets from the restored snapshot before the box is exposed. One-way; once a
+702:            cannot end in `-desktop` or `-<number>` (reserved for the desktop and
+703:            hosted-port URLs). Must be globally unique. The base URL, desktop URL and
+765:          description: Full list of secret files to keep configured. Send existing files again if they should remain.
+776:      description: An immutable snapshot of an environment's config. Editing an environment mints a new version; boxes stay pinned to the version they were created on until upgraded.
+792:      required: [id, name, isDefault, latestVersionId, safeForThirdParties, passGithub, passSecrets, passBoxCredentials, passAgentsCredentials, envContents, secretFiles, versions]
+807:        safeForThirdParties:
+812:          description: Attach the environment's GitHub repositories and the GitHub token (so `gh` and pushes work). Ignored when `safeForThirdParties` is true.
+815:          description: Attach the environment's env variables and secret files. Ignored when `safeForThirdParties` is true.
+818:          description: Attach the box's own service/preview credentials. Ignored when `safeForThirdParties` is true.
+821:          description: Attach agent-provider credentials configured on the Agents page. Ignored when `safeForThirdParties` is true.
+876:        safeForThirdParties: { type: boolean }
+958:      description: Optional desktop/VNC setup options used by the Box dashboard and CLI. Most callers send an empty body.
+960:        publicAccess:
+1235:            filesChanged: { type: integer }
+1341:              description: "lost: the Box agent restarted and forgot the process; running/exitCode are then a best-effort probe and the logs come from the on-disk files."
+1407:              examples: [desktop.url]
+1410:            desktopUrl:
+1413:              description: Secret-bearing desktop or noVNC URL. Redact from logs.
+1513:          description: Public Box id this snapshot belongs to.
+1520:          description: '`base` (full) or `incremental` (delta on a base). `null` for legacy snapshots.'
+1535:          description: Bytes this snapshot added (its delta), not the full restored size.
+1541:          description: Total bytes of your data restored by this snapshot (what resume/download returns; base image excluded). `null` on legacy snapshots.
+1544:          description: Number of your files restored by this snapshot (base image excluded). `null` on legacy snapshots.
+1549:          required: [snapshots]
+1553:              const: snapshot.list
+1554:            snapshots:
+1564:          required: [snapshot]
+1568:              const: snapshot.latest
+1569:            snapshot:
+1576:        A named snapshot: a frozen copy of a box's disk at one moment, saved under a
+1578:        stop, or be deleted and the named snapshot still deploys. Named snapshots never
+1591:            fresh snapshot first, which can run minutes), `ready` when deployable,
+1598:          description: The box this snapshot was saved from (display only).
+1599:        snapshotId:
+1603:            Accepted by `GET /api/box/snapshots/{snapshotId}/tree` to browse its files.
+1606:          description: Box type the snapshot was saved from. Deploys default to it.
+1617:          required: [snapshots]
+1621:              const: snapshot.named.list
+1622:            snapshots:
+1630:          required: [snapshot]
+1634:              const: snapshot.named.info
+1635:            snapshot:
+1649:            a letter or digit. Reusing one of your existing names replaces that snapshot's
+1656:          required: [status, snapshot]
+1660:              const: snapshot.named.saving
+1664:            snapshot:
+1674:              const: snapshot.named.deleted
+1686:          description: Path relative to the snapshot root. Docker named volumes appear under `__dockervol__/`.
+1697:          required: [snapshotId, boxId, generation, treeAvailable, truncated, fileCount, totalSizeBytes, entries]
+1701:              const: snapshot.tree
+1702:            snapshotId:
+1711:              description: '`false` for legacy snapshots or inventories too large to expand; see `reason`.'
+1717:              description: Number of your files in this snapshot (base-image system files excluded).
+1720:              description: Total bytes of your data in this snapshot (base-image system files excluded).
+1723:              description: Exactly the files/dirs a resume or download returns, your data only; base-image system entries are not listed.
+1729:              examples: [legacy_snapshot, inventory_too_large]
+1732:      required: [snapshotId, generation, chunkIndex, r2Key, sizeBytes, sha256, signedUrl]
+1734:        snapshotId:
+1755:          required: [snapshotId, boxId, kind, generation, expiresInSeconds, reconstruct, chunks]
+1759:              const: snapshot.download
+1760:            snapshotId:
+1775:              description: Human-readable note on how to reassemble the chunks into a filesystem.
+1786:              description: Every chunk across the chain (all generations up to and including this snapshot), ordered by `(generation, chunkIndex)`.
+1798:          enum: [box, snapshot]
+1824:              enum: [deletion.operation, box.deleting, snapshot.deleting]
+1877:      description: Missing or invalid bearer token.
+1928:        Machine start or concurrent-box limit reached. Create, fork and resume each count as one
+1936:  /me:
+1941:      operationId: me
+1959:  /account/data-retention:
+1964:      operationId: getDataRetention
+1980:      operationId: updateDataRetention
+1996:  /deletion-operations/{operationId}:
+2000:      description: Poll an accepted Box or snapshot deletion. Only operations owned by the authenticated account are returned. Responses are never cached.
+2001:      operationId: getDeletionOperation
+2012:  /limits:
+2017:      operationId: limits
+2040:  /repos:
+2045:      operationId: repos
+2107:      operationId: selectRepo
+2138:  /api-keys:
+2143:      operationId: apiKeys
+2163:  /webhooks:
+2168:      operationId: listWebhooks
+2183:      operationId: createWebhook
+2217:  /webhooks/{webhookId}:
+2229:      operationId: getWebhook
+2242:      operationId: updateWebhook
+2262:      operationId: deleteWebhook
+2271:  /webhooks/{webhookId}/rotate:
+2283:      operationId: rotateWebhookSigningSecret
+2292:  /secrets:
+2296:      description: Returns the environment variables and secret files configured for Boxes.
+2297:      operationId: secrets
+2318:      operationId: updateSecrets
+2341:  /environments:
+2346:      operationId: environments
+2361:                        safeForThirdParties: false
+2377:      description: Create a new named environment. It starts on version 1 with all fine-grained flags on and `safeForThirdParties` off.
+2378:      operationId: createEnvironment
+2393:  /environments/{environmentId}:
+2404:      operationId: updateEnvironment
+2423:      operationId: deleteEnvironment
+2433:  /environments/{environmentId}/upgrade:
+2438:      operationId: upgradeEnvironment
+2463:  /environments/{environmentId}/vars/{key}:
+2478:      operationId: setEnvironmentVar
+2501:      operationId: deleteEnvironmentVar
+2510:  /environments/{environmentId}/secret-files:
+2520:      operationId: setEnvironmentSecretFile
+2546:      operationId: deleteEnvironmentSecretFile
+2560:  /environments/{environmentId}/repos:
+2565:      operationId: addEnvironmentRepo
+2594:  /environments/{environmentId}/repos/{repositoryId}:
+2599:      operationId: deleteEnvironmentRepo
+2618:  /boxes:
+2622:      operationId: boxes
+2651:                        desktopAvailable: true
+2652:                        desktopUrl: https://desktop.example/stream.html?token=redacted
+2653:                        snapshotAvailable: false
+2654:                        snapshotCompletedAt: null
+2660:      operationId: create
+2688:                      desktopAvailable: false
+2689:                      desktopUrl: null
+2690:                      snapshotAvailable: false
+2691:                      snapshotCompletedAt: null
+2696:  /boxes/{boxId}:
+2702:      description: Poll this endpoint after create, stop, resume, or fork operations.
+2703:      operationId: get
+2724:                      desktopAvailable: true
+2725:                      desktopUrl: https://desktop.example/stream.html?token=redacted
+2726:                      snapshotAvailable: false
+2727:                      snapshotCompletedAt: null
+2733:      operationId: update
+2752:        Accept irreversible background deletion of the Box machine, snapshots, and content-bearing
+2753:        records. This is not archive: the Box cannot be resumed. Named snapshots and other shared
+2755:      operationId: deleteBox
+2768:  /boxes/{boxId}/stop:
+2773:        Stop active work and archive/snapshot the box for later resume or fork.
+2780:        the last successful snapshot. This is irreversible; only reach for it after a
+2782:      operationId: stop
+2803:                    box: { id: bx_23456789, name: Box 2026-05-31 12:00, state: archiving, desktopAvailable: true, snapshotAvailable: false }
+2807:  /boxes/{boxId}/resume:
+2811:      operationId: resume
+2832:                    box: { id: bx_23456789, name: Box 2026-05-31 12:00, state: provisioning, desktopAvailable: false, snapshotAvailable: true }
+2838:  /boxes/{boxId}/fork:
+2842:      operationId: fork
+2857:                    Replaces the env the fork would otherwise inherit from the source box.
+2862:                    Optionally pin the fork to a different named Box environment. Omit to inherit
+2866:                noEnv:
+2869:                    Make the fork no-env (see `CreateBoxRequest.noEnv`). A fork of a no-env box is
+2875:                    Machine size for the fork. Omit to inherit the source box's type. The source
+2886:                    Auto-stop for the fork, in seconds. Omit for the 1 hour default; the fork
+2887:                    does NOT inherit the source box's TTL, so forking a Box that has auto-stop
+2888:                    disabled still gives you a fork that stops itself. `null` disables
+2892:          description: Fork started. The response `id` is the new forked box id.
+2897:                forking:
+2900:                    type: box.forking
+2902:                    status: forking
+2903:                    box: { id: bx_abcdef23, name: Box fork, state: provisioning, desktopAvailable: false, snapshotAvailable: false }
+2909:  /boxes/{boxId}/prompt:
+2914:      operationId: prompt
+2963:  /boxes/{boxId}/events:
+2968:      operationId: events
+3037:  /boxes/{boxId}/prompts/{promptId}:
+3042:      operationId: promptRunStatus
+3057:  /boxes/{boxId}/files:
+3061:      operationId: readFile
+3081:      operationId: writeFile
+3096:  /boxes/{boxId}/commands:
+3100:      description: "Runs the command synchronously by default (timeout configurable via `timeoutSeconds`, 600s cap). With `detached: true` the command starts in the background and a process id is returned immediately; poll `/boxes/{boxId}/commands/{processId}` for status and logs. Returns 400 invalid_timeout when `timeoutSeconds` is not an integer in 1-600. Returns 409 box_starting (retryable) while the Box is still provisioning -- wait until the Box state is ready before running commands. Command execution is never retried automatically: a 502 box_direct_failed means the command may already be running on the Box."
+3101:      operationId: command
+3122:  /boxes/{boxId}/commands/{processId}:
+3126:      operationId: commandStatus
+3143:  /boxes/{boxId}/artifacts:
+3147:      operationId: artifact
+3162:  /boxes/{boxId}/interrupt:
+3166:      operationId: interrupt
+3186:  /boxes/{boxId}/desktop:
+3189:      summary: Get desktop streaming URL
+3190:      description: "Create or fetch a secret-bearing desktop/noVNC URL for live computer-use visibility. Use `?vnc=1` for noVNC; a `provisioning: true` response means poll again."
+3191:      operationId: desktop
+3221:                    type: desktop.url
+3223:                    desktopUrl: https://box-preview.example/vnc.html?_token=redacted
+3229:                    type: desktop.provisioning
+3231:                    message: Preparing VNC desktop…
+3236:  /boxes/{boxId}/host:
+3241:      operationId: hostPort
+3269:  /boxes/{boxId}/sshkey:
+3274:      operationId: sshKey
+3300:  /named-snapshots:
+3303:      summary: List named snapshots
+3304:      description: List your named snapshots, newest first.
+3305:      operationId: listNamedSnapshots
+3308:          description: Named snapshots owned by the authenticated Box user.
+3315:      summary: Save a named snapshot
+3317:        Freeze a box's current state under a name (`box snapshot <id> <name>` in the CLI).
+3318:        Answers `202` immediately with the snapshot in `saving`; a running box takes a fresh
+3319:        capture first, which can run minutes. Poll `GET /named-snapshots/{name}` until the
+3321:        that snapshot's artifact once the new save is ready.
+3322:      operationId: saveNamedSnapshot
+3339:            `named_snapshot_limit` when you already keep the maximum of 10 named snapshots;
+3346:  /named-snapshots/{name}:
+3349:      summary: Get a named snapshot
+3350:      operationId: getNamedSnapshot
+3358:          description: The named snapshot.
+3366:      summary: Remove a named snapshot
+3368:        Remove a named snapshot and release its storage (`box snapshot rm <name>` in the
+3370:      operationId: deleteNamedSnapshot
+3392:  /snapshots:
+3395:      summary: List snapshots
+3397:        List visible completed snapshots across all of your boxes using immutable ownership attribution.
+3398:        Pinned, deletion-scheduled, and privacy-fenced Box snapshots are omitted. Follow `nextCursor`
+3399:        through the complete history; there is no hidden 500-snapshot cap.
+3400:      operationId: listSnapshots
+3407:          description: Completed snapshots owned by the authenticated Box user.
+3412:                snapshots:
+3415:                    type: snapshot.list
+3416:                    snapshots:
+3433:  /boxes/{boxId}/snapshots:
+3436:      summary: List box snapshots
+3437:      description: List visible completed snapshots for one Box with uncapped cursor pagination.
+3438:      operationId: listBoxSnapshots
+3446:          description: Completed snapshots for this box.
+3453:  /boxes/{boxId}/snapshots/latest:
+3456:      summary: Get latest box snapshot
+3457:      description: Return the most recent completed snapshot for this box, or `null` if it has none.
+3458:      operationId: getLatestBoxSnapshot
+3463:          description: Most recent completed snapshot, or `null`.
+3471:                    type: snapshot.latest
+3472:                    snapshot:
+3486:                    type: snapshot.latest
+3487:                    snapshot: null
+3490:  /snapshots/{snapshotId}:
+3493:      summary: Permanently delete snapshot data
+3495:        Accept irreversible background deletion of an unpinned snapshot owned by the authenticated
+3496:        account. Snapshots required by another incremental snapshot or active restore return `409`.
+3498:      operationId: deleteSnapshot
+3512:  /snapshots/{snapshotId}/tree:
+3515:      summary: Get snapshot file tree
+3516:      description: List the files and folders captured in a snapshot, with sizes. Returns a flat list of entries you can render as a tree.
+3517:      operationId: getSnapshotTree
+3522:          description: Flat file/folder listing for the snapshot.
+3530:                    type: snapshot.tree
+3531:                    snapshotId: 7417be09-d419-4ae0-b3fc-7f04a5a71ef1
+3544:                    type: snapshot.tree
+3545:                    snapshotId: 7417be09-d419-4ae0-b3fc-7f04a5a71ef1
+3553:                    reason: legacy_snapshot
+3556:  /snapshots/{snapshotId}/files:
+3559:      summary: Download a file or folder from a snapshot
+3562:        out of a snapshot, the box can be stopped or archived; the machine is never
+3563:        contacted. Use `GET /snapshots/{snapshotId}/tree` to list paths, then pass one
+3564:        here. Paths are relative to the snapshot root (same space as `tree` entries;
+3566:        snapshot as a tar. Folder responses set `X-Snapshot-File-Count`,
+3569:      operationId: getSnapshotFile
+3576:          description: File or folder path inside the snapshot. Empty for the whole snapshot.
+3592:          description: Path has no downloadable bytes, one of `legacy_snapshot` (pre-inventory snapshot), `snapshot_not_indexed` (content captured before the indexed snapshot format; take a new snapshot or use the download bundle), `base_image_file` (stock image file, not stored in snapshots), or `is_symlink` (request the symlink's target instead).
+3596:  /snapshots/{snapshotId}/download:
+3599:      summary: Get snapshot download
+3601:        Return time-limited signed URLs for every chunk needed to reconstruct the box filesystem at this snapshot (the full chain, base through this generation), plus the inventory. Download the chunks and reassemble them as described by `reconstruct`. The `box snapshot pull` CLI command does this for you.
+3602:      operationId: getSnapshotDownload
+3607:          description: Signed chunk URLs for the snapshot chain.
+3615:                    type: snapshot.download
+3616:                    snapshotId: 7417be09-d419-4ae0-b3fc-7f04a5a71ef1
+3621:                    reconstruct: Download every chunk. For each snapshot in ascending generation, concat its chunks by chunkIndex and pipe through `zstd -d | tar -x`.
+3626:                      - snapshotId: 2db50582-716c-424c-817e-9495484f88dd
+3629:                        r2Key: chains/4ced5b04/snapshots/2db50582/chunks/00.tar.zst
+3632:                        signedUrl: https://r2.example/chains/4ced5b04/snapshots/2db50582/chunks/00.tar.zst?sig=redacted
+=== official install script ===
+install_bytes=3214
+#!/usr/bin/env sh
+set -eu
+MODE="box"
+API_URL="https://ascii.dev"
+CHANNEL="ascii-prod"
+INSTALL_DIR="$HOME/.ascii/bin"
+
+case "$(uname -s)" in
+  Linux) OS="linux" ;;
+  Darwin) OS="darwin" ;;
+  *) echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+esac
+
+case "$(uname -m)" in
+  x86_64|amd64) ARCH="x64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+URL="$API_URL/api/box/cli/download?platform=$OS-$ARCH&channel=$CHANNEL"
+mkdir -p "$INSTALL_DIR"
+TMP="$(mktemp)"
+curl -fsSL "$URL" -o "$TMP"
+chmod +x "$TMP"
+mv "$TMP" "$INSTALL_DIR/$MODE"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ascii/$MODE"
+mkdir -p "$CONFIG_DIR"
+cat > "$CONFIG_DIR/config.json" <<EOF
+{
+  "api_url": "$API_URL",
+  "channel": "$CHANNEL"
+}
+EOF
+
+CURRENT_ENV_NAME="BOX_CURRENT_ID"
+if [ "$MODE" = "box-dev" ]; then CURRENT_ENV_NAME="BOX_DEV_CURRENT_ID"; fi
+if [ "$MODE" = "box-staging" ]; then CURRENT_ENV_NAME="BOX_STAGING_CURRENT_ID"; fi
+SHELL_NAME="$(basename "$SHELL" 2>/dev/null || echo sh)"
+PROFILE="$HOME/.profile"
+if [ "$SHELL_NAME" = "zsh" ]; then PROFILE="$HOME/.zshrc"; fi
+if [ "$SHELL_NAME" = "bash" ]; then PROFILE="$HOME/.bashrc"; fi
+if [ "$SHELL_NAME" = "bash" ] || [ "$SHELL_NAME" = "zsh" ]; then
+if [ -f "$PROFILE" ]; then
+  TMP_PROFILE="$(mktemp)"
+  sed "/# ASCII BOX SHELL INTEGRATION START $MODE/,/# ASCII BOX SHELL INTEGRATION END $MODE/d" "$PROFILE" > "$TMP_PROFILE"
+  cat "$TMP_PROFILE" > "$PROFILE"
+  rm -f "$TMP_PROFILE"
+fi
+cat >> "$PROFILE" <<EOF
+
+# ASCII BOX SHELL INTEGRATION START $MODE
+$MODE() {
+EOF
+cat >> "$PROFILE" <<'EOF'
+  current_file=$(mktemp)
+  old_current_file=${BOX_CURRENT_ID_FILE-}
+  export BOX_CURRENT_ID_FILE="$current_file"
+EOF
+cat >> "$PROFILE" <<EOF
+  command "$INSTALL_DIR/$MODE" "\$@"
+EOF
+cat >> "$PROFILE" <<'EOF'
+  box_status=$?
+  if [ "$box_status" -eq 0 ]; then
+    case "${1:-}" in
+      new|start|fork)
+        if [ -s "$current_file" ]; then
+          current_id=$(tr -d '[:space:]' < "$current_file")
+EOF
+cat >> "$PROFILE" <<EOF
+          if [ -n "\$current_id" ]; then export $CURRENT_ENV_NAME="\$current_id"; fi
+EOF
+cat >> "$PROFILE" <<'EOF'
+        fi
+        ;;
+    esac
+  fi
+  if [ -n "$old_current_file" ]; then export BOX_CURRENT_ID_FILE="$old_current_file"; else unset BOX_CURRENT_ID_FILE; fi
+  rm -f "$current_file"
+  return "$box_status"
+}
+EOF
+cat >> "$PROFILE" <<EOF
+# ASCII BOX SHELL INTEGRATION END $MODE
+EOF
+echo "Updated $MODE shell integration in $PROFILE."
+else
+echo "Shell integration for 'current' is available for bash and zsh. Use explicit box IDs in $SHELL_NAME."
+fi
+
+echo "Installed $MODE to $INSTALL_DIR/$MODE"
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*)
+    echo "$INSTALL_DIR is already on PATH."
+    echo "Run: $MODE onboard"
+    ;;
+  *)
+    echo ""
+    echo "$INSTALL_DIR is not on PATH yet."
+    echo "For this terminal, run:"
+    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    echo "  $MODE onboard"
+    echo ""
+    echo "To make it permanent, run:"
+    echo "  printf '\nexport PATH=\"$INSTALL_DIR:\$PATH\"\n' >> $PROFILE"
+    echo "  source $PROFILE"
+    echo "  $MODE onboard"
+    ;;
+esac
+echo ""
+if [ -r /dev/tty ]; then
+  "$INSTALL_DIR/$MODE" onboard < /dev/tty
+else
+  "$INSTALL_DIR/$MODE" onboard
+fi
+=== unauthenticated boundary probes ===
+--- https://ascii.dev/api/box/v1/boxes
+HTTP=401 REDIRECT=
+HTTP/2 401 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+content-type: application/json;charset=utf-8
+date: Fri, 21 Aug 2026 21:14:33 GMT
+via: 1.1 Caddy
+content-length: 247
+
+[body prefix]
+{"ok":false,"type":"box.error","status":401,"code":"unauthorized","message":"unauthorized","error":{"code":"unauthorized","message":"unauthorized","status":401,"details":{"error":"unauthorized"}},"requestId":"req_4c9419dea59740c89631c17c33778b6c"}
+--- https://ascii.dev/api/box/v1/boxes/bx_sb5sbxzz
+HTTP=401 REDIRECT=
+HTTP/2 401 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+content-type: application/json;charset=utf-8
+date: Fri, 21 Aug 2026 21:14:33 GMT
+via: 1.1 Caddy
+content-length: 247
+
+[body prefix]
+{"ok":false,"type":"box.error","status":401,"code":"unauthorized","message":"unauthorized","error":{"code":"unauthorized","message":"unauthorized","status":401,"details":{"error":"unauthorized"}},"requestId":"req_18c3c27f413f498a8c7b11337de9cfa6"}
+--- https://ascii.dev/api/box/v1/snapshots
+HTTP=401 REDIRECT=
+HTTP/2 401 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+content-type: application/json;charset=utf-8
+date: Fri, 21 Aug 2026 21:14:34 GMT
+via: 1.1 Caddy
+content-length: 247
+
+[body prefix]
+{"ok":false,"type":"box.error","status":401,"code":"unauthorized","message":"unauthorized","error":{"code":"unauthorized","message":"unauthorized","status":401,"details":{"error":"unauthorized"}},"requestId":"req_b0331345f57c4002972e9c108b420649"}
+--- https://ascii.dev/api/box/v1/environments
+HTTP=401 REDIRECT=
+HTTP/2 401 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+content-type: application/json;charset=utf-8
+date: Fri, 21 Aug 2026 21:14:34 GMT
+via: 1.1 Caddy
+content-length: 247
+
+[body prefix]
+{"ok":false,"type":"box.error","status":401,"code":"unauthorized","message":"unauthorized","error":{"code":"unauthorized","message":"unauthorized","status":401,"details":{"error":"unauthorized"}},"requestId":"req_830c61d9bf174f8ea6f4a7e5daa48ed2"}
+=== preflight/CORS ===
+--- OPTIONS /boxes
+HTTP/2 204 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+date: Fri, 21 Aug 2026 21:14:35 GMT
+via: 1.1 Caddy
+
+--- OPTIONS /boxes/bx_sb5sbxzz
+HTTP/2 204 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+date: Fri, 21 Aug 2026 21:14:35 GMT
+via: 1.1 Caddy
+
+--- OPTIONS /snapshots
+HTTP/2 204 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+date: Fri, 21 Aug 2026 21:14:35 GMT
+via: 1.1 Caddy
+
+--- OPTIONS /environments
+HTTP/2 204 
+access-control-allow-credentials: false
+access-control-allow-headers: Content-Type, Authorization, X-Audio-Filename, X-Whisper-Prompt, X-Ascii-Confirm-Delete
+access-control-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+access-control-allow-origin: http://localhost:1420
+access-control-max-age: 86400
+alt-svc: h3=":443"; ma=2592000
+date: Fri, 21 Aug 2026 21:14:36 GMT
+via: 1.1 Caddy
+
+=== CLI ===
+Updated box shell integration in /home/runner/.bashrc.
+Installed box to /home/runner/.ascii/bin/box
+
+/home/runner/.ascii/bin is not on PATH yet.
+For this terminal, run:
+  export PATH="/home/runner/.ascii/bin:$PATH"
+  box onboard
+
+To make it permanent, run:
+  printf '\nexport PATH="/home/runner/.ascii/bin:$PATH"\n' >> /home/runner/.bashrc
+  source /home/runner/.bashrc
+  box onboard
+
+box-recon-results/install.sh: line 113: /dev/tty: No such device or address
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 58: box: command not found
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 59: box: command not found
+--- box new --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box get --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box list --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box fork --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box snapshot --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box desktop --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box env --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box ssh --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box scp --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box stop --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box resume --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
+--- box host --help
+/home/runner/work/_temp/43bc2bfc-c824-47ce-b261-29939241580c.sh: line 62: box: command not found
