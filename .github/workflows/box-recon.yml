@@ -4,6 +4,8 @@ on:
   push:
     branches: [box-recon-20260821]
     paths-ignore: [box-recon-results/**]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
