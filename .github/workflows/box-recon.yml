@@ -14,17 +14,17 @@ permissions:
 jobs:
   recon:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
           ref: box-recon-20260821
 
-      - name: Public API and CLI recon
+      - name: Public API, CLI, and web recon
         shell: bash
         run: |
           set -u
-          mkdir -p box-recon-results
+          mkdir -p box-recon-results/web-assets
           exec > >(tee box-recon-results/recon.txt) 2>&1
 
           echo '=== context ==='
@@ -35,21 +35,14 @@ jobs:
           curl -fsSL --max-time 20 https://docs.ascii.dev/openapi/box-v1.yaml -o box-recon-results/box-v1.yaml || true
           if [ -s box-recon-results/box-v1.yaml ]; then
             echo "openapi_bytes=$(wc -c < box-recon-results/box-v1.yaml)"
-            grep -nE '^  /|operationId:|security:|bearer|noEnv|safeForThirdParties|fork|snapshot|desktop|publicAccess|hosting|files|commands' box-recon-results/box-v1.yaml | head -n 1600 || true
-          else
-            echo 'openapi unavailable'
+            grep -nE '^  /|operationId:|security:|bearer|noEnv|safeForThirdParties|fork|snapshot|desktop|publicAccess|hosting|files|commands|webhook' box-recon-results/box-v1.yaml | head -n 2000 || true
           fi
 
           echo '=== official install script ==='
           curl -fsSL --max-time 20 -D box-recon-results/install.headers https://ascii.dev/api/box/install -o box-recon-results/install.sh || true
-          if [ -s box-recon-results/install.sh ]; then
-            echo "install_bytes=$(wc -c < box-recon-results/install.sh)"
-            sed -n '1,260p' box-recon-results/install.sh
-          else
-            echo 'install script unavailable'
-          fi
+          [ -s box-recon-results/install.sh ] && sed -n '1,260p' box-recon-results/install.sh || true
 
-          echo '=== unauthenticated boundary probes ==='
+          echo '=== unauthenticated API boundary probes ==='
           probe() {
             url="$1"
             echo "--- $url"
@@ -60,13 +53,19 @@ jobs:
             head -c 1800 /tmp/body.tmp 2>/dev/null || true
             echo
           }
-          probe https://ascii.dev/api/box/v1/boxes
-          probe https://ascii.dev/api/box/v1/boxes/bx_sb5sbxzz
-          probe https://ascii.dev/api/box/v1/snapshots
-          probe https://ascii.dev/api/box/v1/environments
+          for u in \
+            https://ascii.dev/api/box/v1/me \
+            https://ascii.dev/api/box/v1/boxes \
+            https://ascii.dev/api/box/v1/boxes/bx_sb5sbxzz \
+            https://ascii.dev/api/box/v1/snapshots \
+            https://ascii.dev/api/box/v1/named-snapshots \
+            https://ascii.dev/api/box/v1/environments \
+            https://ascii.dev/api/box/v1/secrets \
+            https://ascii.dev/api/box/v1/api-keys \
+            https://ascii.dev/api/box/v1/webhooks; do probe "$u"; done
 
-          echo '=== preflight/CORS ==='
-          for path in boxes boxes/bx_sb5sbxzz snapshots environments; do
+          echo '=== CORS/preflight ==='
+          for path in boxes boxes/bx_sb5sbxzz snapshots named-snapshots environments secrets api-keys webhooks; do
             echo "--- OPTIONS /$path"
             curl -sS --max-time 15 -o /dev/null -D - -X OPTIONS \
               -H 'Origin: https://attacker.invalid' \
@@ -74,6 +73,48 @@ jobs:
               -H 'Access-Control-Request-Headers: authorization,content-type' \
               "https://ascii.dev/api/box/v1/$path" || true
           done
+
+          echo '=== box.ascii.dev headers + public files ==='
+          for p in / /robots.txt /sitemap.xml /manifest.json /.well-known/security.txt /.well-known/assetlinks.json /favicon.ico; do
+            echo "--- https://box.ascii.dev$p"
+            curl -sS --max-time 20 -D - -o /tmp/sitebody "https://box.ascii.dev$p" || true
+            echo '[body prefix]'; head -c 2000 /tmp/sitebody 2>/dev/null || true; echo
+          done
+
+          echo '=== static asset extraction ==='
+          curl -fsSL --max-time 20 https://box.ascii.dev/ -o box-recon-results/web-assets/index.html || true
+          python3 - <<'PY'
+          import re, pathlib, urllib.parse, urllib.request
+          root=pathlib.Path('box-recon-results/web-assets')
+          html=(root/'index.html').read_text(errors='ignore') if (root/'index.html').exists() else ''
+          urls=set(re.findall(r'''(?:src|href)=["']([^"']+)["']''', html))
+          base='https://box.ascii.dev/'
+          for i,u in enumerate(sorted(urls)):
+              full=urllib.parse.urljoin(base,u)
+              if urllib.parse.urlparse(full).netloc!='box.ascii.dev':
+                  continue
+              if not any(urllib.parse.urlparse(full).path.endswith(x) for x in ('.js','.mjs','.css','.json')):
+                  continue
+              try:
+                  data=urllib.request.urlopen(full, timeout=15).read()
+              except Exception as e:
+                  print('asset-fail',full,e); continue
+              name=f'{i:03d}_'+pathlib.Path(urllib.parse.urlparse(full).path).name
+              (root/name).write_bytes(data)
+              print('asset',full,'bytes',len(data),'saved',name)
+          PY
+
+          echo '=== asset security strings ==='
+          grep -RInaE --binary-files=text \
+            'sourceMappingURL|ascii\.dev/api|box-preview|desktop|_token|Authorization|Bearer|box_[A-Za-z0-9_-]{10,}|api[_-]?key|secret|internal|localhost|127\.0\.0\.1|169\.254\.169\.254|websocket|wss://|https?://' \
+            box-recon-results/web-assets 2>/dev/null | head -n 3000 || true
+
+          echo '=== source map existence ==='
+          while IFS= read -r js; do
+            map="${js}.map"
+            base=$(basename "$js")
+            curl -sS --max-time 15 -o /tmp/map -w "$base.map HTTP=%{http_code} bytes=%{size_download}\n" "https://box.ascii.dev/assets/${base}.map" || true
+          done < <(find box-recon-results/web-assets -type f \( -name '*.js' -o -name '*.mjs' \) -print)
 
           echo '=== CLI ==='
           if [ -s box-recon-results/install.sh ]; then
@@ -83,10 +124,14 @@ jobs:
             box --version || true
             box --help || true
             for c in new get list fork snapshot desktop env ssh scp stop resume host; do
-              echo "--- box $c --help"
-              box "$c" --help || true
+              echo "--- box $c --help"; box "$c" --help || true
             done
           fi
+
+          echo '=== local secret availability (boolean only; values never printed) ==='
+          if [ -n "${BOX_API_KEY:-}" ]; then echo BOX_API_KEY_PRESENT=1; else echo BOX_API_KEY_PRESENT=0; fi
+        env:
+          BOX_API_KEY: ${{ secrets.BOX_API_KEY }}
 
       - name: Persist recon result
         shell: bash
@@ -94,8 +139,6 @@ jobs:
           git config user.name 'box-recon-bot'
           git config user.email 'box-recon-bot@users.noreply.github.com'
           git add -f box-recon-results
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m 'Record Box public recon output [skip ci]'
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record expanded Box recon output [skip ci]'
           git push origin HEAD:box-recon-20260821
