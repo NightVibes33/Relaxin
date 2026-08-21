@@ -1,0 +1,111 @@
+name: Box Recon
+
+on:
+  push:
+    branches: [box-recon-20260821]
+    paths-ignore: [box-recon-results/**]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: box-recon-20260821
+
+      - name: Desktop auth boundary and CLI passive recon
+        shell: bash
+        run: |
+          set -u
+          mkdir -p box-recon-results
+          exec > >(tee box-recon-results/deep-recon.txt) 2>&1
+          date -u
+
+          echo '=== direct CLI download ==='
+          for channel in ascii-prod ascii-staging ascii-dev staging dev; do
+            code=$(curl -sS --max-time 20 -L -o "/tmp/box-$channel" -w '%{http_code}' \
+              "https://ascii.dev/api/box/cli/download?platform=linux-x64&channel=$channel" || true)
+            size=$(wc -c < "/tmp/box-$channel" 2>/dev/null || echo 0)
+            echo "channel=$channel http=$code bytes=$size"
+          done
+          cp /tmp/box-ascii-prod box-recon-results/box-cli 2>/dev/null || true
+          chmod +x box-recon-results/box-cli 2>/dev/null || true
+          if file box-recon-results/box-cli 2>/dev/null | grep -qE 'executable|ELF'; then
+            echo '=== CLI version/help ==='
+            box-recon-results/box-cli --version || true
+            box-recon-results/box-cli --help || true
+            for c in new get list fork snapshot desktop env ssh scp stop resume host auth onboard; do
+              echo "--- $c"; box-recon-results/box-cli "$c" --help || true
+            done
+            echo '=== CLI security-relevant strings ==='
+            strings -a box-recon-results/box-cli | grep -Eio \
+              'https?://[^[:space:]"'"'<>]+|wss?://[^[:space:]"'"'<>]+|[A-Za-z0-9._-]+\.on\.ascii\.dev|/api/box/[A-Za-z0-9_?&=./{}:-]+|desktop|websockify|_token|bearer|authorization|snapshot|webhook|internal|staging' \
+              | sort -u | head -n 2500 || true
+          fi
+
+          echo '=== discover recent desktop hosts from public urlscan index ==='
+          curl -sS --max-time 20 'https://urlscan.io/api/v1/search/?q=domain:on.ascii.dev&size=100' -o /tmp/urlscan.json || true
+          python3 - <<'PY' > /tmp/desktop-hosts
+          import json,re
+          hosts=set()
+          try:
+              x=json.load(open('/tmp/urlscan.json'))
+          except Exception:
+              x={}
+          blob=json.dumps(x)
+          for h in re.findall(r'([a-z0-9-]+-desktop\.on\.ascii\.dev)',blob,re.I):
+              hosts.add(h.lower())
+          hosts.add('ragtop-iodous-dato-desktop.on.ascii.dev')
+          for h in sorted(hosts)[:8]: print(h)
+          PY
+          cat /tmp/desktop-hosts
+
+          echo '=== desktop HTTP + WebSocket auth probes ==='
+          wsprobe() {
+            host="$1"; path="$2"
+            echo "--- WSS https://$host$path"
+            curl -skS --http1.1 --max-time 4 -o /dev/null -D - \
+              -H 'Connection: Upgrade' \
+              -H 'Upgrade: websocket' \
+              -H 'Sec-WebSocket-Version: 13' \
+              -H 'Sec-WebSocket-Key: SGVsbG9Xb3JsZDEyMzQ1Ng==' \
+              -w 'STATUS=%{http_code} REDIRECT=%{redirect_url}\n' \
+              "https://$host$path" || true
+          }
+          while IFS= read -r host; do
+            [ -n "$host" ] || continue
+            echo "### HOST $host"
+            for path in '/' '/vnc.html' '/vnc.html?_token=invalid-canary'; do
+              echo "--- GET https://$host$path"
+              curl -skS --max-time 8 -o /tmp/body -D /tmp/hdr -w 'STATUS=%{http_code} REDIRECT=%{redirect_url}\n' "https://$host$path" || true
+              grep -iE '^(HTTP/|location:|set-cookie:|www-authenticate:|server:|cf-|x-)' /tmp/hdr | head -n 40 || true
+              echo "body_bytes=$(wc -c < /tmp/body 2>/dev/null || echo 0)"
+              grep -Eio '(_token|token)[=:?&%A-Za-z0-9._-]{0,180}' /tmp/body 2>/dev/null | head -n 10 || true
+            done
+            wsprobe "$host" '/websockify'
+            wsprobe "$host" '/websockify?_token=invalid-canary'
+            wsprobe "$host" '/websockify?token=invalid-canary'
+          done < /tmp/desktop-hosts
+
+          echo '=== normal hosted-name control ==='
+          for host in ragtop-iodous-dato.on.ascii.dev; do
+            curl -skS --max-time 8 -o /dev/null -D - -w 'STATUS=%{http_code}\n' "https://$host/" || true
+          done
+
+      - name: Persist results
+        shell: bash
+        run: |
+          rm -f box-recon-results/box-cli
+          git config user.name 'box-recon-bot'
+          git config user.email 'box-recon-bot@users.noreply.github.com'
+          git add -f box-recon-results
+          git diff --cached --quiet && exit 0
+          git commit -m 'Record Box desktop and CLI recon [skip ci]'
+          git push origin HEAD:box-recon-20260821
