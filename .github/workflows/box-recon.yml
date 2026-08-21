@@ -2,10 +2,8 @@ name: Box Recon
 
 on:
   push:
-    branches:
-      - box-recon-20260821
-    paths-ignore:
-      - box-recon-results/**
+    branches: [box-recon-20260821]
+    paths-ignore: [box-recon-results/**]
   workflow_dispatch:
 
 permissions:
@@ -20,125 +18,92 @@ jobs:
         with:
           ref: box-recon-20260821
 
-      - name: Public API, CLI, and web recon
+      - name: Desktop auth boundary and CLI passive recon
         shell: bash
         run: |
           set -u
-          mkdir -p box-recon-results/web-assets
-          exec > >(tee box-recon-results/recon.txt) 2>&1
-
-          echo '=== context ==='
+          mkdir -p box-recon-results
+          exec > >(tee box-recon-results/deep-recon.txt) 2>&1
           date -u
-          uname -a
 
-          echo '=== docs/openapi ==='
-          curl -fsSL --max-time 20 https://docs.ascii.dev/openapi/box-v1.yaml -o box-recon-results/box-v1.yaml || true
-          if [ -s box-recon-results/box-v1.yaml ]; then
-            echo "openapi_bytes=$(wc -c < box-recon-results/box-v1.yaml)"
-            grep -nE '^  /|operationId:|security:|bearer|noEnv|safeForThirdParties|fork|snapshot|desktop|publicAccess|hosting|files|commands|webhook' box-recon-results/box-v1.yaml | head -n 2000 || true
-          fi
-
-          echo '=== official install script ==='
-          curl -fsSL --max-time 20 -D box-recon-results/install.headers https://ascii.dev/api/box/install -o box-recon-results/install.sh || true
-          [ -s box-recon-results/install.sh ] && sed -n '1,260p' box-recon-results/install.sh || true
-
-          echo '=== unauthenticated API boundary probes ==='
-          probe() {
-            url="$1"
-            echo "--- $url"
-            rm -f /tmp/headers.tmp /tmp/body.tmp
-            curl -sS --max-time 15 -o /tmp/body.tmp -D /tmp/headers.tmp -w 'HTTP=%{http_code} REDIRECT=%{redirect_url}\n' "$url" || true
-            sed -n '1,80p' /tmp/headers.tmp 2>/dev/null || true
-            echo '[body prefix]'
-            head -c 1800 /tmp/body.tmp 2>/dev/null || true
-            echo
-          }
-          for u in \
-            https://ascii.dev/api/box/v1/me \
-            https://ascii.dev/api/box/v1/boxes \
-            https://ascii.dev/api/box/v1/boxes/bx_sb5sbxzz \
-            https://ascii.dev/api/box/v1/snapshots \
-            https://ascii.dev/api/box/v1/named-snapshots \
-            https://ascii.dev/api/box/v1/environments \
-            https://ascii.dev/api/box/v1/secrets \
-            https://ascii.dev/api/box/v1/api-keys \
-            https://ascii.dev/api/box/v1/webhooks; do probe "$u"; done
-
-          echo '=== CORS/preflight ==='
-          for path in boxes boxes/bx_sb5sbxzz snapshots named-snapshots environments secrets api-keys webhooks; do
-            echo "--- OPTIONS /$path"
-            curl -sS --max-time 15 -o /dev/null -D - -X OPTIONS \
-              -H 'Origin: https://attacker.invalid' \
-              -H 'Access-Control-Request-Method: GET' \
-              -H 'Access-Control-Request-Headers: authorization,content-type' \
-              "https://ascii.dev/api/box/v1/$path" || true
+          echo '=== direct CLI download ==='
+          for channel in ascii-prod ascii-staging ascii-dev staging dev; do
+            code=$(curl -sS --max-time 20 -L -o "/tmp/box-$channel" -w '%{http_code}' \
+              "https://ascii.dev/api/box/cli/download?platform=linux-x64&channel=$channel" || true)
+            size=$(wc -c < "/tmp/box-$channel" 2>/dev/null || echo 0)
+            echo "channel=$channel http=$code bytes=$size"
           done
-
-          echo '=== box.ascii.dev headers + public files ==='
-          for p in / /robots.txt /sitemap.xml /manifest.json /.well-known/security.txt /.well-known/assetlinks.json /favicon.ico; do
-            echo "--- https://box.ascii.dev$p"
-            curl -sS --max-time 20 -D - -o /tmp/sitebody "https://box.ascii.dev$p" || true
-            echo '[body prefix]'; head -c 2000 /tmp/sitebody 2>/dev/null || true; echo
-          done
-
-          echo '=== static asset extraction ==='
-          curl -fsSL --max-time 20 https://box.ascii.dev/ -o box-recon-results/web-assets/index.html || true
-          python3 - <<'PY'
-          import re, pathlib, urllib.parse, urllib.request
-          root=pathlib.Path('box-recon-results/web-assets')
-          html=(root/'index.html').read_text(errors='ignore') if (root/'index.html').exists() else ''
-          urls=set(re.findall(r'''(?:src|href)=["']([^"']+)["']''', html))
-          base='https://box.ascii.dev/'
-          for i,u in enumerate(sorted(urls)):
-              full=urllib.parse.urljoin(base,u)
-              if urllib.parse.urlparse(full).netloc!='box.ascii.dev':
-                  continue
-              if not any(urllib.parse.urlparse(full).path.endswith(x) for x in ('.js','.mjs','.css','.json')):
-                  continue
-              try:
-                  data=urllib.request.urlopen(full, timeout=15).read()
-              except Exception as e:
-                  print('asset-fail',full,e); continue
-              name=f'{i:03d}_'+pathlib.Path(urllib.parse.urlparse(full).path).name
-              (root/name).write_bytes(data)
-              print('asset',full,'bytes',len(data),'saved',name)
-          PY
-
-          echo '=== asset security strings ==='
-          grep -RInaE --binary-files=text \
-            'sourceMappingURL|ascii\.dev/api|box-preview|desktop|_token|Authorization|Bearer|box_[A-Za-z0-9_-]{10,}|api[_-]?key|secret|internal|localhost|127\.0\.0\.1|169\.254\.169\.254|websocket|wss://|https?://' \
-            box-recon-results/web-assets 2>/dev/null | head -n 3000 || true
-
-          echo '=== source map existence ==='
-          while IFS= read -r js; do
-            map="${js}.map"
-            base=$(basename "$js")
-            curl -sS --max-time 15 -o /tmp/map -w "$base.map HTTP=%{http_code} bytes=%{size_download}\n" "https://box.ascii.dev/assets/${base}.map" || true
-          done < <(find box-recon-results/web-assets -type f \( -name '*.js' -o -name '*.mjs' \) -print)
-
-          echo '=== CLI ==='
-          if [ -s box-recon-results/install.sh ]; then
-            bash box-recon-results/install.sh || true
-            export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
-            command -v box || true
-            box --version || true
-            box --help || true
-            for c in new get list fork snapshot desktop env ssh scp stop resume host; do
-              echo "--- box $c --help"; box "$c" --help || true
+          cp /tmp/box-ascii-prod box-recon-results/box-cli 2>/dev/null || true
+          chmod +x box-recon-results/box-cli 2>/dev/null || true
+          if file box-recon-results/box-cli 2>/dev/null | grep -qE 'executable|ELF'; then
+            echo '=== CLI version/help ==='
+            box-recon-results/box-cli --version || true
+            box-recon-results/box-cli --help || true
+            for c in new get list fork snapshot desktop env ssh scp stop resume host auth onboard; do
+              echo "--- $c"; box-recon-results/box-cli "$c" --help || true
             done
+            echo '=== CLI security-relevant strings ==='
+            strings -a box-recon-results/box-cli | grep -Eio \
+              'https?://[^[:space:]"'"'<>]+|wss?://[^[:space:]"'"'<>]+|[A-Za-z0-9._-]+\.on\.ascii\.dev|/api/box/[A-Za-z0-9_?&=./{}:-]+|desktop|websockify|_token|bearer|authorization|snapshot|webhook|internal|staging' \
+              | sort -u | head -n 2500 || true
           fi
 
-          echo '=== local secret availability (boolean only; values never printed) ==='
-          if [ -n "${BOX_API_KEY:-}" ]; then echo BOX_API_KEY_PRESENT=1; else echo BOX_API_KEY_PRESENT=0; fi
-        env:
-          BOX_API_KEY: ${{ secrets.BOX_API_KEY }}
+          echo '=== discover recent desktop hosts from public urlscan index ==='
+          curl -sS --max-time 20 'https://urlscan.io/api/v1/search/?q=domain:on.ascii.dev&size=100' -o /tmp/urlscan.json || true
+          python3 - <<'PY' > /tmp/desktop-hosts
+          import json,re
+          hosts=set()
+          try:
+              x=json.load(open('/tmp/urlscan.json'))
+          except Exception:
+              x={}
+          blob=json.dumps(x)
+          for h in re.findall(r'([a-z0-9-]+-desktop\.on\.ascii\.dev)',blob,re.I):
+              hosts.add(h.lower())
+          hosts.add('ragtop-iodous-dato-desktop.on.ascii.dev')
+          for h in sorted(hosts)[:8]: print(h)
+          PY
+          cat /tmp/desktop-hosts
 
-      - name: Persist recon result
+          echo '=== desktop HTTP + WebSocket auth probes ==='
+          wsprobe() {
+            host="$1"; path="$2"
+            echo "--- WSS https://$host$path"
+            curl -skS --http1.1 --max-time 4 -o /dev/null -D - \
+              -H 'Connection: Upgrade' \
+              -H 'Upgrade: websocket' \
+              -H 'Sec-WebSocket-Version: 13' \
+              -H 'Sec-WebSocket-Key: SGVsbG9Xb3JsZDEyMzQ1Ng==' \
+              -w 'STATUS=%{http_code} REDIRECT=%{redirect_url}\n' \
+              "https://$host$path" || true
+          }
+          while IFS= read -r host; do
+            [ -n "$host" ] || continue
+            echo "### HOST $host"
+            for path in '/' '/vnc.html' '/vnc.html?_token=invalid-canary'; do
+              echo "--- GET https://$host$path"
+              curl -skS --max-time 8 -o /tmp/body -D /tmp/hdr -w 'STATUS=%{http_code} REDIRECT=%{redirect_url}\n' "https://$host$path" || true
+              grep -iE '^(HTTP/|location:|set-cookie:|www-authenticate:|server:|cf-|x-)' /tmp/hdr | head -n 40 || true
+              echo "body_bytes=$(wc -c < /tmp/body 2>/dev/null || echo 0)"
+              grep -Eio '(_token|token)[=:?&%A-Za-z0-9._-]{0,180}' /tmp/body 2>/dev/null | head -n 10 || true
+            done
+            wsprobe "$host" '/websockify'
+            wsprobe "$host" '/websockify?_token=invalid-canary'
+            wsprobe "$host" '/websockify?token=invalid-canary'
+          done < /tmp/desktop-hosts
+
+          echo '=== normal hosted-name control ==='
+          for host in ragtop-iodous-dato.on.ascii.dev; do
+            curl -skS --max-time 8 -o /dev/null -D - -w 'STATUS=%{http_code}\n' "https://$host/" || true
+          done
+
+      - name: Persist results
         shell: bash
         run: |
+          rm -f box-recon-results/box-cli
           git config user.name 'box-recon-bot'
           git config user.email 'box-recon-bot@users.noreply.github.com'
           git add -f box-recon-results
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Record expanded Box recon output [skip ci]'
+          git diff --cached --quiet && exit 0
+          git commit -m 'Record Box desktop and CLI recon [skip ci]'
           git push origin HEAD:box-recon-20260821
