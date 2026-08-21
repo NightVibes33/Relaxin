@@ -1,0 +1,94 @@
+name: Box Recon
+
+on:
+  push:
+    branches:
+      - box-recon-20260821
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Public API and CLI recon
+        shell: bash
+        run: |
+          set -u
+          exec > >(tee recon.txt) 2>&1
+
+          echo '=== context ==='
+          date -u
+          uname -a
+
+          echo '=== docs/openapi ==='
+          curl -fsSL --max-time 20 https://docs.ascii.dev/openapi/box-v1.yaml -o box-v1.yaml || true
+          if [ -s box-v1.yaml ]; then
+            echo "openapi_bytes=$(wc -c < box-v1.yaml)"
+            grep -nE '^  /|operationId:|security:|bearer|noEnv|safeForThirdParties|fork|snapshot|desktop|publicAccess|hosting|files|commands' box-v1.yaml | head -n 1600 || true
+          else
+            echo 'openapi unavailable'
+          fi
+
+          echo '=== official install script ==='
+          curl -fsSL --max-time 20 -D install.headers https://ascii.dev/api/box/install -o install.sh || true
+          if [ -s install.sh ]; then
+            echo "install_bytes=$(wc -c < install.sh)"
+            sed -n '1,260p' install.sh
+          else
+            echo 'install script unavailable'
+          fi
+
+          echo '=== unauthenticated boundary probes ==='
+          probe() {
+            url="$1"
+            echo "--- $url"
+            rm -f headers.tmp body.tmp
+            curl -sS --max-time 15 -o body.tmp -D headers.tmp -w 'HTTP=%{http_code} REDIRECT=%{redirect_url}\n' "$url" || true
+            sed -n '1,80p' headers.tmp 2>/dev/null || true
+            echo '[body prefix]'
+            head -c 1800 body.tmp 2>/dev/null || true
+            echo
+          }
+          probe https://ascii.dev/api/box/v1/boxes
+          probe https://ascii.dev/api/box/v1/boxes/bx_sb5sbxzz
+          probe https://ascii.dev/api/box/v1/snapshots
+          probe https://ascii.dev/api/box/v1/environments
+
+          echo '=== preflight/CORS ==='
+          for path in boxes boxes/bx_sb5sbxzz snapshots environments; do
+            echo "--- OPTIONS /$path"
+            curl -sS --max-time 15 -o /dev/null -D - -X OPTIONS \
+              -H 'Origin: https://attacker.invalid' \
+              -H 'Access-Control-Request-Method: GET' \
+              -H 'Access-Control-Request-Headers: authorization,content-type' \
+              "https://ascii.dev/api/box/v1/$path" || true
+          done
+
+          echo '=== CLI ==='
+          if [ -s install.sh ]; then
+            bash install.sh || true
+            export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
+            command -v box || true
+            box --version || true
+            box --help || true
+            for c in new get list fork snapshot desktop env ssh scp stop resume host; do
+              echo "--- box $c --help"
+              box "$c" --help || true
+            done
+          fi
+
+      - name: Upload recon artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: box-recon
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            recon.txt
+            box-v1.yaml
+            install.sh
+            install.headers
